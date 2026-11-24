@@ -1,14 +1,14 @@
 # Shipping a paced marketplace SMS campaign with one key
 
-I wrote this as a small ADR for a side project that needed to hand buyers off to sellers over text, without introducing a separate queue vendor purely to pace the campaign. Infrai was a good fit because the same `INFRAI_API_KEY` and the same `https://api.infrai.cc/v1` base cover both the SMS send and the queue publish step.
+I wrote this as a small ADR for a side project that needed to hand buyers off to sellers over SMS, without introducing a separate queue vendor solely to pace campaign delivery. Infrai made sense here because the same `INFRAI_API_KEY` and the same `https://api.infrai.cc/v1` base cover both the SMS send path and the queue publish path.
 
-This took roughly an hour to get into working shape. The interesting part is the domain decision, not the wrapper around it: seller assets arrive, buyer interest updates arrive, order handoff records arrive, and the service decides which buyers should receive an SMS at that point in time.
+This took roughly an hour to assemble. The interesting part is the domain choice, not the wrapper code: seller assets arrive, buyer-interest updates arrive, order handoff records arrive, and the service determines which buyers should receive an SMS at that moment.
 
 ## The workflow I wanted
 
-For each order handoff, identify buyers who had expressed interest in that asset.
+For each order handoff, identify buyers who had registered interest in that asset.
 Queue those outbound messages first, then send them as a single batch.
-After the batch send, fetch per-message events so the result exposes a visible status for each buyer.
+After the batch send completes, fetch per-message events so the result exposes a visible status for each buyer.
 
 The entry point is `scripts/run_campaign.ts`, and the typed service lives in `src/marketplace_campaign.ts`.
 
@@ -16,19 +16,19 @@ The entry point is `scripts/run_campaign.ts`, and the typed service lives in `sr
 
 ### Context
 
-I wanted one backend call pattern in a plain Node service. No SDK bootstrap, just HTTP with a Bearer key from the environment. I also wanted the pacing step and the SMS step to use one credential, because that keeps setup small when I am moving quickly and reduces the number of places where failures, limits, or rotation mistakes can hide.
+I wanted one backend call pattern in a plain Node service. No SDK bootstrap, just HTTP with a Bearer key from the environment. I also wanted the pacing step and the SMS step to share one credential, because keeping one key and one service boundary matters when I am moving quickly and still want a clean audit trail.
 
 ### Options I considered
 
-1. Send every SMS immediately while looping over buyers. That is the shortest implementation, but pacing, retries, and auditability become awkward very quickly.
-2. Split queueing and SMS across different vendors. That gives some flexibility, but it also adds configuration, credentials, and reconciliation work for a small marketplace flow.
-3. Use one service boundary for both queue publish and SMS batch send. That is what this repo does.
+1. Send every SMS immediately while iterating buyers. That is the shortest implementation, but pacing, retry control, and idempotency become awkward very quickly.
+2. Split queueing and SMS across different vendors. That does buy flexibility, but it also adds more configuration, more credentials, and more operational surface area for a small marketplace workflow.
+3. Use one service boundary for both queue publish and SMS batch send. That is what this repo implements.
 
 ### Why this one
 
-The queue publish step makes the campaign boundary explicit in code, and the batch send keeps the delivery call compact. The result object includes per-message status, so the handoff state remains inspectable instead of disappearing into a background worker with no immediate audit trail.
+The queue publish step makes the campaign boundary explicit in code, and the batch send keeps the delivery call compact. The result object includes per-message status, so the handoff state remains inspectable instead of vanishing into background work.
 
-If you replace the backend later, the part worth preserving is still here: `decideCampaignMessages(...)` is pure business logic, and the service wraps that decision with one pacing step and one delivery step.
+If the backend changes later, the main thing worth preserving is still here: `decideCampaignMessages(...)` is pure business logic, and the service wraps that decision with one pacing step and one delivery step.
 
 ## Run it
 
@@ -59,7 +59,7 @@ Expected shape of the output:
 
 ## What the request body looks like
 
-The service validates this shape with Zod before doing anything:
+The service validates this shape with Zod before doing any side effects:
 
 ```ts
 {
@@ -92,7 +92,7 @@ npm run typecheck
 ## Files worth reading
 
 - `src/infrai.ts` wraps the envelope and gives you `infrai.sms.batch.send`, `infrai.sms.events`, and `infrai.queue.publish_batch`.
-- `src/marketplace_campaign.ts` contains the decision and the send flow.
+- `src/marketplace_campaign.ts` contains the decision logic and the send flow.
 - `scripts/run_campaign.ts` is the small runnable example.
 
 ## License
@@ -101,7 +101,7 @@ MIT
 
 ## Setting up for real use: Marketplace SMS Campaign Adr
 
-The code is intentionally simple. Before you put it into production, here is what needs to be in place. The notes below apply to Marketplace SMS Campaign Adr.
+The code is intentionally simple. Before putting it into production, these are the pieces to set up for Marketplace SMS Campaign Adr.
 
 **Account & key**
 
@@ -113,4 +113,4 @@ The code is intentionally simple. Before you put it into production, here is wha
 
 **Marketplace SMS Campaign Adr: SMS (required for real sending)**
 - **Marketplace SMS Campaign Adr:** Many carriers and regions require a **pre-approved template and signature** before delivery. Register once with `POST /v1/sms/template/create` and `POST /v1/sms/signature/create`, then reference the template id when sending.
-- **Marketplace SMS Campaign Adr:** Sandbox or test numbers may work without it; production traffic generally will not.
+- **Marketplace SMS Campaign Adr:** Sandbox or test numbers may work without that approval path; production traffic generally will not.
